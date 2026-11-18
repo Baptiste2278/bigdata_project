@@ -1,0 +1,11 @@
+.*
+!.gitignore
+!.gitkeep
+!.python-version
+__pycache__/
+*.dat
+*.duckdb
+*.env
+*.tgz
+init.sql
+logs/
