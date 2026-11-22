@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ingest-bronze-openflights
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: download
+          image: curlimages/curl:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "download start $(date -u +%FT%TZ)"
+              for f in airports airlines routes; do
+                curl -fsSL -o "/data/$f.dat" "$SOURCE_BASE_URL/$f.dat"
+              done
+              cd /data && sha256sum *.dat > checksums.sha256 && ls -l /data
+          envFrom:
+            - configMapRef:
+                name: ingest-config
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 100m, memory: 128Mi}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: upload
+          image: amazon/aws-cli:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              for f in airports.dat airlines.dat routes.dat checksums.sha256; do
+                aws s3 cp "/data/$f" "s3://$BUCKET/$BRONZE_PREFIX/$f"
+              done
+              aws s3 ls "s3://$BUCKET/$BRONZE_PREFIX/" --recursive --summarize
+          envFrom:
+            - configMapRef:
+                name: ingest-config
+            - secretRef:
+                name: s3-credentials
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 200m, memory: 256Mi}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
